@@ -1,0 +1,2 @@
+# Immediate-mode TicTacToe
+The entire user-interface is derived from the current state of the game in response to external stimulii. The passage of time means nothing in TicTacToe therefore the only stimulii entering the game are from the connected input devices and in particular from the mouse. Everytime a meaningful mouse input is performed, the controller will send an alert to the gameplay system representing a player and they will use that stimulus to update the game state.
