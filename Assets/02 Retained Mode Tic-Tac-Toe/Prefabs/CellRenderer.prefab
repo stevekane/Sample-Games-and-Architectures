@@ -822,6 +822,7 @@ GameObject:
   m_Component:
   - component: {fileID: 8131667895044047773}
   - component: {fileID: 8131667895044047772}
+  - component: {fileID: 4473550406103919761}
   m_Layer: 0
   m_Name: CellRenderer
   m_TagString: Untagged
@@ -862,9 +863,26 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: eae50921a325ef24497bd8725e785bb8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  XPanelMeshRenderer: {fileID: 3471979568174248888}
-  OPanelMeshRenderer: {fileID: 4563245960118254932}
-  CurrentCellState: 0
+  Animator: {fileID: 4473550406103919761}
+--- !u!95 &4473550406103919761
+Animator:
+  serializedVersion: 3
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8131667895044047779}
+  m_Enabled: 1
+  m_Avatar: {fileID: 0}
+  m_Controller: {fileID: 9100000, guid: 33acf0e41e96c4943a057e6f629c94df, type: 2}
+  m_CullingMode: 0
+  m_UpdateMode: 0
+  m_ApplyRootMotion: 0
+  m_LinearVelocityBlending: 0
+  m_WarningMessage: 
+  m_HasTransformHierarchy: 1
+  m_AllowConstantClipSamplingOptimization: 1
+  m_KeepAnimatorControllerStateOnDisable: 0
 --- !u!1 &8394749239843790584
 GameObject:
   m_ObjectHideFlags: 0

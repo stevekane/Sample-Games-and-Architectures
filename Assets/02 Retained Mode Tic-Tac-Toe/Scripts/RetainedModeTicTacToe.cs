@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using System.Collections.Generic;
+using UnityEngine;
 using UnityEngine.SceneManagement;
 
 namespace RetainedModeTicTacToe {
@@ -7,67 +8,75 @@ namespace RetainedModeTicTacToe {
     public virtual void OnExit(RetainedModeTicTacToe game) {}
     public abstract void Step(RetainedModeTicTacToe game, float dt);
   }
-
+  
   public class RetainedModeTicTacToe : MonoBehaviour {
+    public enum State { Base, Unloading, Loading }
+
     public string TitleScreenSceneName;
-    public AsyncOperation SceneLoad;
-    public AsyncOperation SceneUnload;
 
+    Queue<string> SceneNamesToLoad = new Queue<string>(1);
+    string SceneNameToLoad;
+    AsyncOperation LoadingSceneOperation;
+    string LoadedSceneName;
     GameState GameState;
-    string OutgoingSceneName;
-    string IncomingSceneName;
+    State CurrentState;
 
-    public void LoadNewGameStateScene(string sceneName) {
-      OutgoingSceneName = IncomingSceneName;
-      IncomingSceneName = sceneName;
-      SceneLoad = SceneManager.LoadSceneAsync(sceneName, LoadSceneMode.Additive);
+    public void LoadScene(string sceneName) {
+      SceneNamesToLoad.Enqueue(sceneName);
     }
 
-    // TODO: Decide wtf to do here...
-    public void ReloadCurrentGameStateScene(string sceneName) {
-      Debug.LogError("NOT IMPLEMENTED RELOAD CURRENT GAME STATE SCENE");
+    void Start() {
+      LoadScene(TitleScreenSceneName);
     }
 
-    public void SetGameState(GameState gameState) {
-      GameState.OnExit(this);
-      GameState = gameState;
-      GameState.OnEnter(this);
+    void Update() {
+      switch (CurrentState) {
+        case State.Base: {
+          if (SceneNamesToLoad.Count > 0) {
+            if (GameState) {
+              GameState.OnExit(this);
+              SceneNameToLoad = SceneNamesToLoad.Dequeue();
+              LoadingSceneOperation = SceneManager.UnloadSceneAsync(LoadedSceneName);
+              CurrentState = State.Unloading;
+            } else {
+              SceneNameToLoad = SceneNamesToLoad.Dequeue();
+              LoadingSceneOperation = SceneManager.LoadSceneAsync(SceneNameToLoad, LoadSceneMode.Additive);
+              CurrentState = State.Loading;
+            }
+          } else {
+            GameState.Step(this, Time.deltaTime);
+          }
+        }
+        break;
+
+        case State.Unloading: {
+          if (LoadingSceneOperation.isDone) {
+            LoadingSceneOperation = SceneManager.LoadSceneAsync(SceneNameToLoad, LoadSceneMode.Additive);
+            CurrentState = State.Loading;
+          }
+        }
+        break;
+
+        case State.Loading: {
+          if (LoadingSceneOperation.isDone) {
+            LoadingSceneOperation = null;
+            LoadedSceneName = SceneNameToLoad;
+            GameState = GameStateFromScene(LoadedSceneName);
+            GameState.OnEnter(this);
+            CurrentState = State.Base;
+          }
+        }
+        break;
+      }
     }
 
-    public GameState GameStateFromScene(string sceneName) {
-      foreach (var gameObject in SceneManager.GetSceneByName(IncomingSceneName).GetRootGameObjects()) {
+    GameState GameStateFromScene(string sceneName) {
+      foreach (var gameObject in SceneManager.GetSceneByName(sceneName).GetRootGameObjects()) {
         if (gameObject.TryGetComponent(out GameState gameState)) {
           return gameState;
         }
       }
       return null;
-    }
-
-    void Awake() {
-      LoadNewGameStateScene(TitleScreenSceneName);
-    }
-
-    void Update() {
-      if (SceneLoad != null && SceneLoad.isDone) {
-        SceneLoad = null;
-        if (GameState) {
-          GameState.OnExit(this);
-        }
-        GameState = GameStateFromScene(IncomingSceneName);
-        GameState.OnEnter(this);
-        if (OutgoingSceneName != null && OutgoingSceneName != "") {
-          Debug.Log(OutgoingSceneName);
-          SceneUnload = SceneManager.UnloadSceneAsync(OutgoingSceneName);
-        }
-      }
-
-      if (SceneUnload != null && SceneUnload.isDone) {
-        SceneUnload = null;
-      }
-
-      if (GameState != null) {
-        GameState.Step(this, Time.deltaTime);
-      }
     }
   }
 }

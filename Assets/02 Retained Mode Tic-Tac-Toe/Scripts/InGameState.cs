@@ -1,5 +1,6 @@
 ﻿using System;
 using UnityEngine;
+using UnityEngine.UI;
 using static RetainedModeTicTacToe.Extensions;
 
 namespace RetainedModeTicTacToe {
@@ -76,59 +77,85 @@ namespace RetainedModeTicTacToe {
   public class BoardRenderer {
     public int Size;
     public CellRenderer[] CellRenderers;
-    public float InterpolationEpsilon = .01f;
-    public float PanelIntensity = 1.5f;
-
-    public void Step(in float dt) {
-      for (var i = 0; i < CellRenderers.Length; i++) {
-        var cellRenderer = CellRenderers[i];
-
-        switch (cellRenderer.CurrentCellState) {
-          case CellState.X: {
-            var baseColor = cellRenderer.XPanelMeshRenderer.material.GetColor("_BaseColor");
-            var currentEmissionColor = cellRenderer.XPanelMeshRenderer.material.GetColor("_EmissionColor");
-            var nextEmissionColor = ExponentialLerp(currentEmissionColor.a, PanelIntensity, dt, InterpolationEpsilon);
-            var targetRotation = Quaternion.LookRotation(Vector3.right, Vector3.up);
-            var currentRotation = cellRenderer.transform.rotation;
-            var nextRotation = ExponentialSlerp(currentRotation, targetRotation, dt, InterpolationEpsilon);
-
-            cellRenderer.transform.rotation = nextRotation;
-            cellRenderer.XPanelMeshRenderer.material.SetColor("_EmissionColor", baseColor * nextEmissionColor);
-          }
-          break;
-
-          case CellState.O: {
-            var baseColor = cellRenderer.OPanelMeshRenderer.material.GetColor("_BaseColor");
-            var currentEmissionColor = cellRenderer.OPanelMeshRenderer.material.GetColor("_EmissionColor");
-            var nextEmissionColor = ExponentialLerp(currentEmissionColor.a, PanelIntensity, dt, InterpolationEpsilon);
-            var targetRotation = Quaternion.LookRotation(Vector3.left, Vector3.up);
-            var currentRotation = cellRenderer.transform.rotation;
-            var nextRotation = ExponentialSlerp(currentRotation, targetRotation, dt, InterpolationEpsilon);
-
-            cellRenderer.transform.rotation = nextRotation;
-            cellRenderer.OPanelMeshRenderer.material.SetColor("_EmissionColor", baseColor * nextEmissionColor);
-          }
-          break;
-        }
-      }
-    }
 
     public void OccupyCell(in int x, in int y, in bool isPlayer1) {
-      CellRenderers[To1DIndex(Size, x, y)].CurrentCellState = isPlayer1 ? CellState.X : CellState.O;
+      CellRenderers[To1DIndex(Size, x, y)].Animator.SetInteger("State", isPlayer1 ? 1 : 2);
+    }
+  }
+
+  [Serializable]
+  public class UI {
+    [SerializeField] Animator GameOverOverlayAnimator = null;
+    [SerializeField] Text GameOverOverlayText = null;
+    [SerializeField] Texture2D XCursor = null;
+    [SerializeField] Texture2D OCursor = null;
+
+    public void OnGameStart(bool player1Turn) {
+      GameOverOverlayAnimator.SetBool("Hidden", true);
+      Cursor.SetCursor(player1Turn ? XCursor : OCursor, Vector2.zero, CursorMode.Auto);
+    }
+
+    public void OnChangePlayerTurn(bool player1Turn) {
+      Cursor.SetCursor(player1Turn ? XCursor : OCursor, Vector2.zero, CursorMode.Auto);
+    }
+
+    public void OnVictory(bool player1Won) {
+      var symbol = player1Won ? "X" : "O";
+
+      GameOverOverlayText.text = $"{symbol} Wins!";
+      GameOverOverlayAnimator.SetBool("Hidden", false);
+    }
+
+    public void OnDraw() {
+      GameOverOverlayText.text = $"It's a draw!";
+      GameOverOverlayAnimator.SetBool("Hidden", false);
+    }
+  }
+
+  [Serializable]
+  public class AudioSystem {
+    [SerializeField] AudioClip[] TurnSounds = null;
+    [SerializeField] AudioClip InGameMusic = null;
+    [SerializeField] AudioClip DrawMusic = null;
+    [SerializeField] AudioClip VictoryMusic = null;
+    [SerializeField] AudioSource MusicSource = null;
+
+    public void OnGameStart() {
+      MusicSource.Play(InGameMusic);
+    }
+
+    public void OnPlayerTurn(bool isPlayer1) {
+      AudioSource.PlayClipAtPoint(RandomFrom(TurnSounds), Vector3.zero);
+    }
+
+    public void OnDraw() {
+      MusicSource.Play(DrawMusic);
+    }
+
+    public void OnVictory() {
+      MusicSource.Play(VictoryMusic);
     }
   }
 
   public class InGameState : GameState {
     public enum State { Play, Victory, Draw }
 
-    public State CurrentState;
-    public Board Board = new Board(3);
-    public BoardRenderer BoardRenderer;
-    public Camera Camera;
-    public bool IsPlayer1Turn = true;
+    [SerializeField] string OwningSceneName = null;
+    [SerializeField] Board Board = new Board(3);
+    [SerializeField] BoardRenderer BoardRenderer = null;
+    [SerializeField] Camera Camera = null;
+    [SerializeField] UI UI = null;
+    [SerializeField] AudioSystem AudioSystem = null;
+
+    State CurrentState;
+    bool IsPlayer1Turn = true;
+
+    public override void OnEnter(RetainedModeTicTacToe game) {
+      UI.OnGameStart(IsPlayer1Turn);
+      AudioSystem.OnGameStart();
+    }
 
     public override void Step(RetainedModeTicTacToe game, float dt) {
-      BoardRenderer.Step(dt);
       switch (CurrentState) {
         case State.Play: {
           var screenRay = Camera.ScreenPointToRay(Input.mousePosition);
@@ -140,25 +167,29 @@ namespace RetainedModeTicTacToe {
             if (!Board.Occupied(x, y)) {
               Board.OccupyCell(x, y, IsPlayer1Turn);
               BoardRenderer.OccupyCell(x, y, IsPlayer1Turn);
+              AudioSystem.OnPlayerTurn(IsPlayer1Turn);
               if (Board.PlayerWon(IsPlayer1Turn)) {
+                UI.OnVictory(IsPlayer1Turn);
+                AudioSystem.OnVictory();
                 CurrentState = State.Victory;
               } else if (Board.GameIsADraw()) {
+                UI.OnDraw();
+                AudioSystem.OnDraw();
                 CurrentState = State.Draw;
               } else {
                 IsPlayer1Turn = !IsPlayer1Turn;
+                UI.OnChangePlayerTurn(IsPlayer1Turn);
               }
             }
           }
         }
         break;
 
+        case State.Draw:
         case State.Victory: {
-
-        }
-        break;
-
-        case State.Draw: {
-
+          if (Input.anyKeyDown) {
+            game.LoadScene(OwningSceneName);
+          }
         }
         break;
       }

@@ -22,5 +22,15 @@ namespace RetainedModeTicTacToe {
     public static float ExponentialLerp(float a, float b, in float dt, in float epsilon) {
       return Mathf.Lerp(a, b, 1.0f - Mathf.Pow(epsilon, dt));
     }
+
+    public static T RandomFrom<T>(T[] xs) {
+      return xs[Random.Range(0, xs.Length)];
+    }
+
+    public static void Play(this AudioSource source, AudioClip clip) {
+      source.Stop();
+      source.clip = clip;
+      source.Play();
+    }
   }
 }
