@@ -93,25 +93,49 @@ namespace RetainedModeTicTacToe {
   }
 
   public class InGameState : GameState {
+    public enum State { Play, Victory, Draw }
+
+    public State CurrentState;
     public Board Board = new Board(3);
     public BoardRenderer BoardRenderer;
     public Camera Camera;
     public bool IsPlayer1Turn;
 
     public override void Step(RetainedModeTicTacToe game, float dt) {
-      var screenRay = Camera.ScreenPointToRay(Input.mousePosition);
-
-      if (Input.GetMouseButtonDown(0) && Physics.Raycast(screenRay, out RaycastHit hit)) {
-        var x = Mathf.RoundToInt(hit.point.x);
-        var y = Mathf.RoundToInt(hit.point.y);
-
-        if (!Board.Occupied(x, y)) {
-          Board.OccupyCell(x, y, IsPlayer1Turn);
-          BoardRenderer.OccupyCell(x, y, IsPlayer1Turn);
-          IsPlayer1Turn = !IsPlayer1Turn;
-        }
-      }
       BoardRenderer.Step(dt);
+      switch (CurrentState) {
+        case State.Play: {
+          var screenRay = Camera.ScreenPointToRay(Input.mousePosition);
+
+          if (Input.GetMouseButtonDown(0) && Physics.Raycast(screenRay, out RaycastHit hit)) {
+            var x = Mathf.RoundToInt(hit.point.x);
+            var y = Mathf.RoundToInt(hit.point.y);
+
+            if (!Board.Occupied(x, y)) {
+              Board.OccupyCell(x, y, IsPlayer1Turn);
+              BoardRenderer.OccupyCell(x, y, IsPlayer1Turn);
+              if (Board.PlayerWon(IsPlayer1Turn)) {
+                CurrentState = State.Victory;
+              } else if (Board.GameIsADraw()) {
+                CurrentState = State.Draw;
+              } else {
+                IsPlayer1Turn = !IsPlayer1Turn;
+              }
+            }
+          }
+        }
+        break;
+
+        case State.Victory: {
+
+        }
+        break;
+
+        case State.Draw: {
+
+        }
+        break;
+      }
     }
   }
 }

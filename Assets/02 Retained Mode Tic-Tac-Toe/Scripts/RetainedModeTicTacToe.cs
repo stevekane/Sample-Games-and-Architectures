@@ -23,6 +23,11 @@ namespace RetainedModeTicTacToe {
       SceneLoad = SceneManager.LoadSceneAsync(sceneName, LoadSceneMode.Additive);
     }
 
+    // TODO: Decide wtf to do here...
+    public void ReloadCurrentGameStateScene(string sceneName) {
+      Debug.LogError("NOT IMPLEMENTED RELOAD CURRENT GAME STATE SCENE");
+    }
+
     public void SetGameState(GameState gameState) {
       GameState.OnExit(this);
       GameState = gameState;
