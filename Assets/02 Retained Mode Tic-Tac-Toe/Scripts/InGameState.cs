@@ -3,10 +3,10 @@ using UnityEngine;
 using static RetainedModeTicTacToe.Extensions;
 
 namespace RetainedModeTicTacToe {
+  public enum CellState { Empty, X, O }
+
   [Serializable]
   public struct Board {
-    public enum CellState { Empty, X, O }
-
     public int Size;
     public CellState[] CellStates;
 
@@ -77,18 +77,44 @@ namespace RetainedModeTicTacToe {
     public int Size;
     public CellRenderer[] CellRenderers;
     public float InterpolationEpsilon = .01f;
+    public float PanelIntensity = 1.5f;
 
     public void Step(in float dt) {
       for (var i = 0; i < CellRenderers.Length; i++) {
-        CellRenderers[i].RotateTowardsTarget(dt, InterpolationEpsilon);
+        var cellRenderer = CellRenderers[i];
+
+        switch (cellRenderer.CurrentCellState) {
+          case CellState.X: {
+            var baseColor = cellRenderer.XPanelMeshRenderer.material.GetColor("_BaseColor");
+            var currentEmissionColor = cellRenderer.XPanelMeshRenderer.material.GetColor("_EmissionColor");
+            var nextEmissionColor = ExponentialLerp(currentEmissionColor.a, PanelIntensity, dt, InterpolationEpsilon);
+            var targetRotation = Quaternion.LookRotation(Vector3.right, Vector3.up);
+            var currentRotation = cellRenderer.transform.rotation;
+            var nextRotation = ExponentialSlerp(currentRotation, targetRotation, dt, InterpolationEpsilon);
+
+            cellRenderer.transform.rotation = nextRotation;
+            cellRenderer.XPanelMeshRenderer.material.SetColor("_EmissionColor", baseColor * nextEmissionColor);
+          }
+          break;
+
+          case CellState.O: {
+            var baseColor = cellRenderer.OPanelMeshRenderer.material.GetColor("_BaseColor");
+            var currentEmissionColor = cellRenderer.OPanelMeshRenderer.material.GetColor("_EmissionColor");
+            var nextEmissionColor = ExponentialLerp(currentEmissionColor.a, PanelIntensity, dt, InterpolationEpsilon);
+            var targetRotation = Quaternion.LookRotation(Vector3.left, Vector3.up);
+            var currentRotation = cellRenderer.transform.rotation;
+            var nextRotation = ExponentialSlerp(currentRotation, targetRotation, dt, InterpolationEpsilon);
+
+            cellRenderer.transform.rotation = nextRotation;
+            cellRenderer.OPanelMeshRenderer.material.SetColor("_EmissionColor", baseColor * nextEmissionColor);
+          }
+          break;
+        }
       }
     }
 
     public void OccupyCell(in int x, in int y, in bool isPlayer1) {
-      var index = To1DIndex(Size, x, y);
-      var forward = isPlayer1 ? Vector3.left : Vector3.right;
-
-      CellRenderers[index].TargetRotation = Quaternion.LookRotation(forward, Vector3.up);
+      CellRenderers[To1DIndex(Size, x, y)].CurrentCellState = isPlayer1 ? CellState.X : CellState.O;
     }
   }
 
@@ -99,7 +125,7 @@ namespace RetainedModeTicTacToe {
     public Board Board = new Board(3);
     public BoardRenderer BoardRenderer;
     public Camera Camera;
-    public bool IsPlayer1Turn;
+    public bool IsPlayer1Turn = true;
 
     public override void Step(RetainedModeTicTacToe game, float dt) {
       BoardRenderer.Step(dt);

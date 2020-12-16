@@ -18,5 +18,9 @@ namespace RetainedModeTicTacToe {
     public static Quaternion ExponentialSlerp(Quaternion a, Quaternion b, in float dt, in float epsilon) {
       return Quaternion.Slerp(a, b, 1.0f - Mathf.Pow(epsilon, dt));
     }
+
+    public static float ExponentialLerp(float a, float b, in float dt, in float epsilon) {
+      return Mathf.Lerp(a, b, 1.0f - Mathf.Pow(epsilon, dt));
+    }
   }
 }
