@@ -8,4 +8,13 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/01 Immediate Mode Tic-Tac-Toe/Scenes/01 Immediate Mode UI.unity
     guid: d1c3109bdb54ad54c8a2b2838528e640
+  - enabled: 1
+    path: Assets/02 Retained Mode Tic-Tac-Toe/Scenes/02 Retained Mode Tic-Tac-Toe.unity
+    guid: 621a103640d2c534cbc9f98fbde1ccf4
+  - enabled: 1
+    path: Assets/02 Retained Mode Tic-Tac-Toe/Scenes/RetainedMode TicTacToe InGame.unity
+    guid: db130b71fd03bfb49869fbfc2f39afc1
+  - enabled: 1
+    path: Assets/02 Retained Mode Tic-Tac-Toe/Scenes/RetainedMode TicTacToe TitleScreen.unity
+    guid: cfefde8bdbb7c534d8db3fb849c36c9e
   m_configObjects: {}
