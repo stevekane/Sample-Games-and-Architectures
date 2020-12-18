@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace RoyalGameOfUr {
   public static class Extensions {
-    public static Vector2Int RoundToInt(in Vector3 v) {
+    public static Vector2Int ToLogicalPosition(in Vector3 v) {
       return new Vector2Int(Mathf.RoundToInt(v.x), Mathf.RoundToInt(v.z));
     }
 
@@ -14,7 +14,7 @@ namespace RoyalGameOfUr {
     public static Dictionary<Vector2Int, Tile> FromAuthoredTiles(RenderTile[] authoredTiles) {
       var dict = new Dictionary<Vector2Int, Tile>(authoredTiles.Length);
       foreach (var authoredTile in authoredTiles) {
-        var position = RoundToInt(authoredTile.transform.position);
+        var position = ToLogicalPosition(authoredTile.transform.position);
         var tile = new Tile { 
           IsRosette = authoredTile.IsRosette,
           IsSafe = authoredTile.IsSafe

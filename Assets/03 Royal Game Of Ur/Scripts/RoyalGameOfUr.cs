@@ -18,65 +18,147 @@ namespace RoyalGameOfUr {
     public void Step(RoyalGameOfUr game, float dt) {
       var screenRay = Camera.ScreenPointToRay(Input.mousePosition);
       var player = game.IsPlayer1Turn ? game.Player1 : game.Player2;
-      var otherPlayer = game.IsPlayer1Turn ? game.Player2 : game.Player1;
 
       if (Input.GetMouseButtonDown(0) && Physics.Raycast(screenRay, out RaycastHit hit)) {
-        var position = RoundToInt(hit.point);
-        var pieceIndex = Array.IndexOf(player.PiecePositions, position);
-
-        if (pieceIndex >= 0) {
-          var routeIndex = Array.IndexOf(player.Route, position);
-          var candidateRouteIndex = routeIndex + game.DiceCount;
-          var candidatePositionOnPlayerRoute = candidateRouteIndex < player.Route.Length;
-
-          if (candidatePositionOnPlayerRoute) {
-            var candidatePosition = player.Route[candidateRouteIndex];
-
-            // TODO: May not be important now. The route begins/ends off the board so this maybe should be lifted
-            // as in some sense pieces may move outside the board as well
-            if (game.PositionToTile.TryGetValue(candidatePosition, out var tile)) {
-              var occupiedByOwnPiece = player.PiecePositions.Contains(candidatePosition);
-              var occupiedByEnemyPiece = otherPlayer.PiecePositions.Contains(candidatePosition);
-              var isRosette = tile.IsRosette;
-
-              if (!occupiedByOwnPiece || (occupiedByEnemyPiece && !isRosette)) {
-                game.MovePiece(player, pieceIndex, candidateRouteIndex);
-              } else {
-                Debug.Log("This move is not allowed");
-              }
-            } else {
-              Debug.LogError("Position does not seem to correspond to a tile position. should not happen!");
+        if (game.TryGetPieceIndex(player, ToLogicalPosition(hit.point), out var pieceIndex)) {
+          if (game.IsStillInPlay(player, pieceIndex)) {
+            if (game.TryGetMove(player, pieceIndex, game.DiceCount, out var position)) {
+              game.MovePiece(player, pieceIndex, position);
             }
-          } else {
-            Debug.Log("Not on the board");
           }
-        } else {
-          Debug.Log("This is not an area containing the player's piece");
         }
       }
     }
   }
 
   [Serializable]
-  public class RenderPlayer {
-    public Transform[] Route;
-    public RenderPiece[] Pieces;
-  }
-
-  [Serializable]
   public class Renderer {
+    const int INITIAL_TRANSACTION_QUEUE_SIZE = 9;
+
+    public abstract class Transaction {
+      public abstract bool Complete(Renderer renderer);
+      public virtual void OnStart(Renderer renderer) {}
+      public virtual void OnEnd(Renderer renderer) {}
+      public virtual void Execute(Renderer renderer, in float dt) {}
+    }
+
+    class MovePieceTransaction : Transaction {
+      AnimationCurve Curve;
+      float Duration;
+      float Remaining;
+      RenderPiece Piece;
+      Vector3 StartingPosition;
+      Vector3 TargetPosition;
+
+      public MovePieceTransaction(AnimationCurve curve, in float duration, RenderPiece piece, in Vector2Int position) {
+        Curve = curve;
+        Duration = duration;
+        Remaining = duration;
+        Piece = piece;
+        TargetPosition = ToWorldPosition(position);
+      }
+
+      public override bool Complete(Renderer renderer) {
+        return Remaining <= 0;
+      }
+
+      public override void OnStart(Renderer renderer) {
+        // TODO: Questionable...
+        StartingPosition = ToWorldPosition(ToLogicalPosition(Piece.transform.position));
+      }
+
+      public override void Execute(Renderer renderer, in float dt) {
+        Piece.transform.position = Vector3.Lerp(StartingPosition, TargetPosition, Curve.Evaluate(1 - Remaining / Duration));
+        Remaining = Mathf.Max(0, Remaining - dt);
+      }
+    }
+
+    class RollDiceTransaction : Transaction {
+      bool[] Dice;
+
+      public RollDiceTransaction(bool[] dice) {
+        Dice = new bool[dice.Length];
+        dice.CopyTo(Dice, 0);
+      }
+
+      public override bool Complete(Renderer renderer) {
+        return true;
+      }
+
+      public override void OnStart(Renderer renderer) {
+        renderer.DiceCountText.text = Dice.Count(true.Equals).ToString();
+      }
+    }
+
+    class SetTurnTransaction : Transaction {
+      Light OnLight;
+      Light OffLight;
+
+      public SetTurnTransaction(Light onLight, Light offLight) {
+        OnLight = onLight;
+        OffLight = offLight;
+      }
+
+      public override bool Complete(Renderer renderer) {
+        return true;
+      }
+
+      public override void OnStart(Renderer renderer) {
+        OnLight.enabled = true;
+        OffLight.enabled = false;
+      }
+    }
+
+    [Serializable]
+    public class RenderPlayer {
+      public Transform[] Route;
+      public RenderPiece[] Pieces;
+    }
+
     public RenderPlayer RenderPlayer1;
     public RenderPlayer RenderPlayer2;
-    [SerializeField] Text DiceCountText;
 
-    public void Step(RoyalGameOfUr game, float dt) {
-      for (var i = 0; i < RenderPlayer1.Pieces.Length; i++) {
-        RenderPlayer1.Pieces[i].transform.position = ToWorldPosition(game.Player1.PiecePositions[i]);
+    [SerializeField] Light Player1Spotlight = null;
+    [SerializeField] Light Player2Spotlight = null;
+    [SerializeField] Text DiceCountText = null;
+    [SerializeField] AnimationCurve MoveCurve = null;
+    [SerializeField] float MoveDuration = 1f;
+    Queue<Transaction> Transactions = new Queue<Transaction>(INITIAL_TRANSACTION_QUEUE_SIZE);
+    Transaction CurrentTransaction;
+
+    public void MovePiece(in bool isPlayer1, in int pieceIndex, Vector2Int position) {
+      var player = isPlayer1 ? RenderPlayer1 : RenderPlayer2;
+      var piece = player.Pieces[pieceIndex];
+
+      Transactions.Enqueue(new MovePieceTransaction(MoveCurve, MoveDuration, piece, position));
+    }
+
+    public void RollDice(in bool[] dice) {
+      Transactions.Enqueue(new RollDiceTransaction(dice));
+    }
+
+    public void SetTurn(bool isPlayer1) {
+      var onLight = isPlayer1 ? Player1Spotlight : Player2Spotlight;
+      var offLight = isPlayer1 ? Player2Spotlight : Player1Spotlight;
+
+      Transactions.Enqueue(new SetTurnTransaction(onLight, offLight));
+    }
+
+    public void Step(float dt) {
+      if (CurrentTransaction != null) {
+        if (!CurrentTransaction.Complete(this)) {
+          CurrentTransaction.Execute(this, dt);
+        } else {
+          CurrentTransaction.OnEnd(this);
+          CurrentTransaction = null;
+        }
+      } else {
+        if (Transactions.Count > 0) {
+          CurrentTransaction = Transactions.Dequeue();
+          CurrentTransaction.OnStart(this);
+          CurrentTransaction.Execute(this, dt);
+        }
       }
-      for (var i = 0; i < RenderPlayer2.Pieces.Length; i++) {
-        RenderPlayer2.Pieces[i].transform.position = ToWorldPosition(game.Player2.PiecePositions[i]);
-      }
-      DiceCountText.text = game.DiceCount.ToString();
     }
   }
 
@@ -91,78 +173,13 @@ namespace RoyalGameOfUr {
     public Vector2Int[] Route;
     public Vector2Int[] PiecePositions;
 
-    public Player(RenderPlayer renderPlayer) {
-      Route = renderPlayer.Route.Select(p => RoundToInt(p.position)).ToArray();
-      PiecePositions = renderPlayer.Pieces.Select(p => RoundToInt(p.transform.position)).ToArray();
+    public Player(Renderer.RenderPlayer renderPlayer) {
+      Route = renderPlayer.Route.Select(p => ToLogicalPosition(p.position)).ToArray();
+      PiecePositions = renderPlayer.Pieces.Select(p => ToLogicalPosition(p.transform.position)).ToArray();
     }
   }
 
   enum State { TakingTurn, GameOver }
-
-  /*
-  The architecture of these games is as follows:
-
-    The input system queries the RawInputs and its own state to build up player actions.
-    These actions are not raw however, because the Input System queries the Game itself
-    to ask about the legitimacy of various actions. Once the InputSystem believes it has formulated
-    a valid move, it sends it to the Game as a transaction / action / command. At this point,
-    several things happen: The game's logical state is updated and the event is sent to any
-    connected systems that wish to know about it. This architecture is somewhat like a virtual machine
-    in that the "op-codes" for permuting the game's state are the key events in the game and the virtual
-    machines that receive are independent responders to these updates. Specifically, the rendering layer
-    of the game is decoupled from the logical layer of the game such that logical play may continue
-    while smoother visuals are playing out. Additionally, the audio for the game may be separated into
-    logical audio events and rendering audio events. What this really means is captured in the flows below:
-
-    InputSystem(LogicalGameState, RawInput) -> Actions
-
-    LogicalGameState(Action)
-    LogicalRenderingSystem(Action)
-    LogicalAudioSystem(Action)
-    RendererState(Action)
-      RenderingAudioSystem
-    
-    Effectively, a single Action produced by the InputSystem will get processed by four independent virtual
-    machines that maintain their own state and respond in their own way. These systems should not be aware 
-    of one-another to avoid entangling them or sharing state.
-
-    The design goal of this architecture is to decouple the logical rules and data structures for a given game
-    from the way it is presented. This allows new games to be prototyped with some ease and also allows the 
-    rendering to evolve independently. Most importantly, it allows logical gameplay to proceeed instantly and 
-    thus frees the players from needing to wait for the renderers to catch up to their pace of play. This is important
-    for creating the illusion or feeling of responsiveness in a game and SHOULD be a benefit of playing a board game
-    on a computer: namely that you do not need to perform the mechanical actions to execute a play or wait for 
-    these turns to happen arbitrarily.
-
-    From an architectural perspective, this means that the renderer should be an event processor that does not 
-    immediately respond to the new events placed in its event queue but rather stores them in a dependency-tree
-    and executes them when the actors participating in the event are first available. For example, if we have 
-    a game like Chess in which 1 piece might attack another piece, we would specifiy this visual event as 
-    "Piece1 attack Piece2". Our virtual machine knows that it will act on both piece1 and piece2 and therefore 
-    it must wait to execute this move until both pieces are available. The simplest way to do this of course is 
-    serial execution in which events are strictly processed in the order in which they are recieved. You could also
-    use concurrent execution which, for example, would allow "Move Piece 3 to Position 1" and "Piece1 attack Piece2"
-    to concurrently-execute as they share no state. However, this is easier said than done because it's entirely
-    possible that they DO share state due to, for example, their need to move through the board. Perhaps naively 
-    executing these two events concurrently would result in passes needing to occupy the same visual spaces during their
-    travels. This sort of dependency is much trickier to thoroughly vet though it's certainly entirely possible.
-
-    I do think it makes the most sense to simply assume that the renderer is a serial-execution list and that will
-    probably work for most circumstances.
-
-    Now, a final thought about the InputSystem's relationship to the Logical Game State. It would probably make sense
-    to regard the InputSystem as a "trusted agent" of the gamestate meaning that it is the last line of defense for
-    preventing erroneous moves from being processed by the game state. One could certainly program this relationship
-    in a more defensive manner by having the gamestate check all paramaters passed to it to ensure they are logical 
-    and valid. However, because the InputSystem needs to restrict player inputs to meaningful actions ( for the benefit 
-    of the player ) this checking will already be happening. It feels tedious and redundant to do it over and over so
-    I propose that the following fundamental flow of control is what happens even though it is spread across multiple
-    systems:
-
-      GameState sets InputSystemState
-      InputSystem processes RawInput against validation checks provided by the GameState
-      InputSystem sends ValidatedEvent to GameState for processing
-  */
 
   public class RoyalGameOfUr : MonoBehaviour {
     // Run-time logical state
@@ -197,7 +214,8 @@ namespace RoyalGameOfUr {
       return routeIndexForPosition != player.Route.LastIndex();
     }
 
-    public bool CanMove(Player player, in int pieceIndex, in int amount) {
+    public bool TryGetMove(Player player, in int pieceIndex, in int amount, out Vector2Int position) {
+      var otherPlayer = player == Player1 ? Player2 : Player1;
       var piecePosition = player.PiecePositions[pieceIndex];
       var routeIndex = Array.IndexOf(player.Route, piecePosition);
       var candidateRouteIndex = routeIndex + amount;
@@ -207,39 +225,51 @@ namespace RoyalGameOfUr {
         var candidateRoutePosition = player.Route[candidateRouteIndex];
 
         if (PositionToTile.TryGetValue(candidateRoutePosition, out Tile tile)) {
-          var isNotAlreadyOccupiedByThisPlayer = Array.IndexOf(player.PiecePositions, candidateRoutePosition) < 0;
+          var occupiedByPlayer = Array.IndexOf(player.PiecePositions, candidateRoutePosition) >= 0;
+          var occupiedByOpponent = Array.IndexOf(otherPlayer.PiecePositions, candidateRoutePosition) >= 0;
+          var canMove = !occupiedByPlayer && (!occupiedByOpponent || (occupiedByOpponent && !tile.IsSafe));
 
-          if (isNotAlreadyOccupiedByThisPlayer && !tile.IsSafe) {
+          if (canMove) {
+            position = candidateRoutePosition;
             return true;
-          } else {
-            return false;
           }
-        } else {
-          return true;
         }
-      } else {
-        return false;
       }
+      position = default;
+      return false;
     }
 
     // Transactions
+    public void SetTurn(bool isPlayer1) {
+      IsPlayer1Turn = isPlayer1;
+      Renderer.SetTurn(IsPlayer1Turn);
+    }
+
     public void RollDice() {
       for (var i = 0; i < Dice.Length; i++) {
         Dice[i] = Random.Range(0, 2) == 1;
       }
+      Renderer.RollDice(Dice);
     }
 
-    public void MovePiece(Player player, int pieceIndex, int routeIndex) {
-      var piece = player.PiecePositions[pieceIndex];
-      var routePosition = player.Route[routeIndex];
+    public void MovePiece(Player player, int pieceIndex, Vector2Int position) {
+      var otherPlayer = player == Player1 ? Player2 : Player1;
 
-      player.PiecePositions[pieceIndex] = player.Route[routeIndex];
-      do {
-        IsPlayer1Turn = !IsPlayer1Turn;
+      player.PiecePositions[pieceIndex] = position;
+      Renderer.MovePiece(player == Player1, pieceIndex, position);
+      if (TryGetPieceIndex(otherPlayer, position, out var index)) {
+        otherPlayer.PiecePositions[index] = otherPlayer.Route[0];
+        Renderer.MovePiece(player != Player1, index, otherPlayer.Route[0]);
+      }
+      if (PositionToTile.TryGetValue(position, out var tile) && !tile.IsRosette) {
+        SetTurn(!IsPlayer1Turn);
+      }
+      RollDice();
+      while (DiceCount == 0) {
+        SetTurn(!IsPlayer1Turn);
         RollDice();
-      } while (DiceCount == 0);
+      }
     }
-
 
     // LifeCycle 
     void Awake() {
@@ -250,18 +280,19 @@ namespace RoyalGameOfUr {
       Player1 = new Player(Renderer.RenderPlayer1);
       Player2 = new Player(Renderer.RenderPlayer2);
       CurrenState = State.TakingTurn;
-      IsPlayer1Turn = false;
-      do {
-        IsPlayer1Turn = !IsPlayer1Turn;
+      IsPlayer1Turn = true;
+      RollDice();
+      while (DiceCount == 0) {
+        SetTurn(!IsPlayer1Turn);
         RollDice();
-      } while (DiceCount == 0);
+      }
     }
 
     void Update() {
       switch (CurrenState) {
         case State.TakingTurn: {
           InputSystem.Step(this, Time.deltaTime);
-          Renderer.Step(this, Time.deltaTime);
+          Renderer.Step(Time.deltaTime);
         }
         break;
 
