@@ -83,6 +83,7 @@ namespace RoyalGameOfUr {
   [Serializable]
   public struct Tile {
     public bool IsRosette;
+    public bool IsSafe;
   }
 
   [Serializable]
@@ -98,6 +99,71 @@ namespace RoyalGameOfUr {
 
   enum State { TakingTurn, GameOver }
 
+  /*
+  The architecture of these games is as follows:
+
+    The input system queries the RawInputs and its own state to build up player actions.
+    These actions are not raw however, because the Input System queries the Game itself
+    to ask about the legitimacy of various actions. Once the InputSystem believes it has formulated
+    a valid move, it sends it to the Game as a transaction / action / command. At this point,
+    several things happen: The game's logical state is updated and the event is sent to any
+    connected systems that wish to know about it. This architecture is somewhat like a virtual machine
+    in that the "op-codes" for permuting the game's state are the key events in the game and the virtual
+    machines that receive are independent responders to these updates. Specifically, the rendering layer
+    of the game is decoupled from the logical layer of the game such that logical play may continue
+    while smoother visuals are playing out. Additionally, the audio for the game may be separated into
+    logical audio events and rendering audio events. What this really means is captured in the flows below:
+
+    InputSystem(LogicalGameState, RawInput) -> Actions
+
+    LogicalGameState(Action)
+    LogicalRenderingSystem(Action)
+    LogicalAudioSystem(Action)
+    RendererState(Action)
+      RenderingAudioSystem
+    
+    Effectively, a single Action produced by the InputSystem will get processed by four independent virtual
+    machines that maintain their own state and respond in their own way. These systems should not be aware 
+    of one-another to avoid entangling them or sharing state.
+
+    The design goal of this architecture is to decouple the logical rules and data structures for a given game
+    from the way it is presented. This allows new games to be prototyped with some ease and also allows the 
+    rendering to evolve independently. Most importantly, it allows logical gameplay to proceeed instantly and 
+    thus frees the players from needing to wait for the renderers to catch up to their pace of play. This is important
+    for creating the illusion or feeling of responsiveness in a game and SHOULD be a benefit of playing a board game
+    on a computer: namely that you do not need to perform the mechanical actions to execute a play or wait for 
+    these turns to happen arbitrarily.
+
+    From an architectural perspective, this means that the renderer should be an event processor that does not 
+    immediately respond to the new events placed in its event queue but rather stores them in a dependency-tree
+    and executes them when the actors participating in the event are first available. For example, if we have 
+    a game like Chess in which 1 piece might attack another piece, we would specifiy this visual event as 
+    "Piece1 attack Piece2". Our virtual machine knows that it will act on both piece1 and piece2 and therefore 
+    it must wait to execute this move until both pieces are available. The simplest way to do this of course is 
+    serial execution in which events are strictly processed in the order in which they are recieved. You could also
+    use concurrent execution which, for example, would allow "Move Piece 3 to Position 1" and "Piece1 attack Piece2"
+    to concurrently-execute as they share no state. However, this is easier said than done because it's entirely
+    possible that they DO share state due to, for example, their need to move through the board. Perhaps naively 
+    executing these two events concurrently would result in passes needing to occupy the same visual spaces during their
+    travels. This sort of dependency is much trickier to thoroughly vet though it's certainly entirely possible.
+
+    I do think it makes the most sense to simply assume that the renderer is a serial-execution list and that will
+    probably work for most circumstances.
+
+    Now, a final thought about the InputSystem's relationship to the Logical Game State. It would probably make sense
+    to regard the InputSystem as a "trusted agent" of the gamestate meaning that it is the last line of defense for
+    preventing erroneous moves from being processed by the game state. One could certainly program this relationship
+    in a more defensive manner by having the gamestate check all paramaters passed to it to ensure they are logical 
+    and valid. However, because the InputSystem needs to restrict player inputs to meaningful actions ( for the benefit 
+    of the player ) this checking will already be happening. It feels tedious and redundant to do it over and over so
+    I propose that the following fundamental flow of control is what happens even though it is spread across multiple
+    systems:
+
+      GameState sets InputSystemState
+      InputSystem processes RawInput against validation checks provided by the GameState
+      InputSystem sends ValidatedEvent to GameState for processing
+  */
+
   public class RoyalGameOfUr : MonoBehaviour {
     // Run-time logical state
     public bool[] Dice = new bool[4];
@@ -112,29 +178,57 @@ namespace RoyalGameOfUr {
     [SerializeField] InputSystem InputSystem = null;
     [SerializeField] Renderer Renderer = null;
 
+    // Queries
     public int DiceCount {
       get {
         return Dice.Count(true.Equals); // ew david...ew
       }
     }
 
+    public bool TryGetPieceIndex(Player player, in Vector2Int position, out int index) {
+      index = Array.IndexOf(player.PiecePositions, position);
+      return index >= 0;
+    }
+
+    public bool IsStillInPlay(Player player, in int pieceIndex) {
+      var piecePosition = player.PiecePositions[pieceIndex];
+      var routeIndexForPosition = Array.IndexOf(player.Route, piecePosition);
+
+      return routeIndexForPosition != player.Route.LastIndex();
+    }
+
+    public bool CanMove(Player player, in int pieceIndex, in int amount) {
+      var piecePosition = player.PiecePositions[pieceIndex];
+      var routeIndex = Array.IndexOf(player.Route, piecePosition);
+      var candidateRouteIndex = routeIndex + amount;
+      var canMoveOnRoute = candidateRouteIndex <= player.Route.LastIndex();
+
+      if (canMoveOnRoute) {
+        var candidateRoutePosition = player.Route[candidateRouteIndex];
+
+        if (PositionToTile.TryGetValue(candidateRoutePosition, out Tile tile)) {
+          var isNotAlreadyOccupiedByThisPlayer = Array.IndexOf(player.PiecePositions, candidateRoutePosition) < 0;
+
+          if (isNotAlreadyOccupiedByThisPlayer && !tile.IsSafe) {
+            return true;
+          } else {
+            return false;
+          }
+        } else {
+          return true;
+        }
+      } else {
+        return false;
+      }
+    }
+
+    // Transactions
     public void RollDice() {
       for (var i = 0; i < Dice.Length; i++) {
         Dice[i] = Random.Range(0, 2) == 1;
       }
     }
 
-    // TODO: Add essential queries about game state to the game
-    // TODO: Add winning condition checks
-    // TODO: Add checks for whether a player has a play or not
-    // TODO: Add alert state that times out a player's turn after 3 seconds when they have no play?
-    // TODO: How to handle turns when the player rolls zero? This means they have no moves.
-    // TODO: How to handle turns when the player has no moves based on their current roll?
-    // TODO: Add handling of rosettes properly and the safe cell
-
-    // TODO: This currently assumes play always changes between players regardless of landing on rosettes
-    // eventually, this should only change players if the space landed on does not contain a rosette
-    // TODO: Should check if the game has ended here as well.
     public void MovePiece(Player player, int pieceIndex, int routeIndex) {
       var piece = player.PiecePositions[pieceIndex];
       var routePosition = player.Route[routeIndex];
@@ -146,6 +240,8 @@ namespace RoyalGameOfUr {
       } while (DiceCount == 0);
     }
 
+
+    // LifeCycle 
     void Awake() {
       var authoredTiles = FindObjectsOfType<RenderTile>();
 

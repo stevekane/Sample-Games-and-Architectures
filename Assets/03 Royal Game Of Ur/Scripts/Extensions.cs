@@ -15,11 +15,16 @@ namespace RoyalGameOfUr {
       var dict = new Dictionary<Vector2Int, Tile>(authoredTiles.Length);
       foreach (var authoredTile in authoredTiles) {
         var position = RoundToInt(authoredTile.transform.position);
-        var tile = new Tile { IsRosette = authoredTile.IsRosette };
+        var tile = new Tile { 
+          IsRosette = authoredTile.IsRosette,
+          IsSafe = authoredTile.IsSafe
+        };
 
         dict.Add(position, tile);
       }
       return dict;
     }
+
+    public static int LastIndex<T>(this T[] xs) => xs.Length - 1;
   }
 }
