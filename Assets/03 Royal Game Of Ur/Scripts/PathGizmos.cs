@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 
-public class PlayerPathAuthoring : MonoBehaviour {
+public class PathGizmos : MonoBehaviour {
   public Color PathColor;
   public Transform[] Positions;
   public Vector3 RenderingOffset = Vector3.up;
