@@ -2,31 +2,52 @@
 using System.Linq;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
 using Random = UnityEngine.Random;
 using static RoyalGameOfUr.Extensions;
 
 namespace RoyalGameOfUr {
   [Serializable]
   public class InputSystem {
-    [SerializeField] Camera Camera;
+    public enum State { None, AwaitingDiceRoll, AwaitingPieceSelection }
 
-    public InputSystem(Camera camera) {
-      Camera = camera;
-    }
+    const float MAX_DISTANCE = 1000f;
+
+    [SerializeField] Camera Camera = null;
+    [SerializeField] LayerMask DiceLayerMask = default;
+    [SerializeField] LayerMask BoardLayerMask = default;
+
+    public State CurrentState;
 
     public void Step(RoyalGameOfUr game, float dt) {
       var screenRay = Camera.ScreenPointToRay(Input.mousePosition);
       var player = game.IsPlayer1Turn ? game.Player1 : game.Player2;
 
-      if (Input.GetMouseButtonDown(0) && Physics.Raycast(screenRay, out RaycastHit hit)) {
-        if (game.TryGetPieceIndex(player, ToLogicalPosition(hit.point), out var pieceIndex)) {
-          if (game.IsStillInPlay(player, pieceIndex)) {
-            if (game.TryGetMove(player, pieceIndex, game.DiceCount, out var position)) {
-              game.MovePiece(player, pieceIndex, position);
+      switch (CurrentState) {
+        case State.None: {
+
+        }
+        break;
+
+        case State.AwaitingDiceRoll: {
+          if (Input.GetMouseButtonDown(0) && Physics.Raycast(screenRay, out var hit, MAX_DISTANCE, DiceLayerMask)) {
+            Debug.Log("You clicked the dice plane");
+            game.RollDice();
+          }
+        }
+        break;
+
+        case State.AwaitingPieceSelection: {
+          if (Input.GetMouseButtonDown(0) && Physics.Raycast(screenRay, out var hit, MAX_DISTANCE, BoardLayerMask)) {
+            if (game.TryGetPieceIndex(player, ToLogicalPosition(hit.point), out var pieceIndex)) {
+              if (game.IsStillInPlay(player, pieceIndex)) {
+                if (game.TryGetMove(player, pieceIndex, game.DiceCount, out var position)) {
+                  game.MovePiece(player, pieceIndex, position);
+                }
+              }
             }
           }
         }
+        break;
       }
     }
   }
@@ -63,7 +84,6 @@ namespace RoyalGameOfUr {
       }
 
       public override void OnStart(Renderer renderer) {
-        // TODO: Questionable...
         StartingPosition = ToWorldPosition(ToLogicalPosition(Piece.transform.position));
       }
 
@@ -75,9 +95,11 @@ namespace RoyalGameOfUr {
 
     class RollDiceTransaction : Transaction {
       bool[] Dice;
+      RenderDice[] RenderDice;
 
-      public RollDiceTransaction(bool[] dice) {
+      public RollDiceTransaction(bool[] dice, RenderDice[] renderDice) {
         Dice = new bool[dice.Length];
+        RenderDice = renderDice;
         dice.CopyTo(Dice, 0);
       }
 
@@ -86,17 +108,23 @@ namespace RoyalGameOfUr {
       }
 
       public override void OnStart(Renderer renderer) {
-        renderer.DiceCountText.text = Dice.Count(true.Equals).ToString();
+        for (var i = 0; i < Dice.Length; i++) {
+          if (Dice[i]) {
+            RenderDice[i].transform.rotation = Quaternion.LookRotation(Vector3.forward, Vector3.up);
+          } else {
+            RenderDice[i].transform.rotation = Quaternion.LookRotation(Vector3.down, Vector3.forward);
+          }
+        }
       }
     }
 
     class SetTurnTransaction : Transaction {
-      Light OnLight;
-      Light OffLight;
+      public RenderPlayer ActivePlayer;
+      public RenderPlayer InactivePlayer;
 
-      public SetTurnTransaction(Light onLight, Light offLight) {
-        OnLight = onLight;
-        OffLight = offLight;
+      public SetTurnTransaction(RenderPlayer activePlayer, RenderPlayer inactivePlayer) {
+        ActivePlayer = activePlayer;
+        InactivePlayer = inactivePlayer;
       }
 
       public override bool Complete(Renderer renderer) {
@@ -104,8 +132,17 @@ namespace RoyalGameOfUr {
       }
 
       public override void OnStart(Renderer renderer) {
-        OnLight.enabled = true;
-        OffLight.enabled = false;
+        foreach (var piece in ActivePlayer.Pieces) {
+          foreach (var meshRenderer in piece.GetComponentsInChildren<MeshRenderer>()) {
+            meshRenderer.material.EnableKeyword("_EMISSION");
+          }
+        }
+
+        foreach (var piece in InactivePlayer.Pieces) {
+          foreach (var meshRenderer in piece.GetComponentsInChildren<MeshRenderer>()) {
+            meshRenderer.material.DisableKeyword("_EMISSION");
+          }
+        }
       }
     }
 
@@ -118,9 +155,7 @@ namespace RoyalGameOfUr {
     public RenderPlayer RenderPlayer1;
     public RenderPlayer RenderPlayer2;
 
-    [SerializeField] Light Player1Spotlight = null;
-    [SerializeField] Light Player2Spotlight = null;
-    [SerializeField] Text DiceCountText = null;
+    [SerializeField] RenderDice[] RenderDice = null;
     [SerializeField] AnimationCurve MoveCurve = null;
     [SerializeField] float MoveDuration = 1f;
     Queue<Transaction> Transactions = new Queue<Transaction>(INITIAL_TRANSACTION_QUEUE_SIZE);
@@ -134,14 +169,14 @@ namespace RoyalGameOfUr {
     }
 
     public void RollDice(in bool[] dice) {
-      Transactions.Enqueue(new RollDiceTransaction(dice));
+      Transactions.Enqueue(new RollDiceTransaction(dice, RenderDice));
     }
 
     public void SetTurn(bool isPlayer1) {
-      var onLight = isPlayer1 ? Player1Spotlight : Player2Spotlight;
-      var offLight = isPlayer1 ? Player2Spotlight : Player1Spotlight;
+      var activePlayer = isPlayer1 ? RenderPlayer1 : RenderPlayer2;
+      var inactivePlayer = isPlayer1 ? RenderPlayer2 : RenderPlayer1;
 
-      Transactions.Enqueue(new SetTurnTransaction(onLight, offLight));
+      Transactions.Enqueue(new SetTurnTransaction(activePlayer, inactivePlayer));
     }
 
     public void Step(float dt) {
@@ -179,16 +214,16 @@ namespace RoyalGameOfUr {
     }
   }
 
-  enum State { TakingTurn, GameOver }
-
   public class RoyalGameOfUr : MonoBehaviour {
+    enum State { RollingDice, ChoosingMove, GameOver }
+
     // Run-time logical state
     public bool[] Dice = new bool[4];
     public Dictionary<Vector2Int, Tile> PositionToTile;
     public Player Player1;
     public Player Player2;
     public bool IsPlayer1Turn;
-    State CurrenState;
+    State CurrentState;
 
     // Editor-configured initial state
     [SerializeField] int InitialRandomSeed = 1;
@@ -197,9 +232,11 @@ namespace RoyalGameOfUr {
 
     // Queries
     public int DiceCount {
-      get {
-        return Dice.Count(true.Equals); // ew david...ew
-      }
+      get { return Dice.Count(true.Equals); }
+    }
+
+    public Player ActivePlayer {
+      get { return IsPlayer1Turn ? Player1 : Player2; }
     }
 
     public bool TryGetPieceIndex(Player player, in Vector2Int position, out int index) {
@@ -233,23 +270,38 @@ namespace RoyalGameOfUr {
             position = candidateRoutePosition;
             return true;
           }
+        } else {
+          position = candidateRoutePosition;
+          return true;
         }
       }
       position = default;
       return false;
     }
 
-    // Transactions
-    public void SetTurn(bool isPlayer1) {
-      IsPlayer1Turn = isPlayer1;
-      Renderer.SetTurn(IsPlayer1Turn);
+    public bool PlayerHasMove(Player player, in int amount) {
+      for (var i = 0; i < player.PiecePositions.Length; i++) {
+        if (TryGetMove(player, i, amount, out var position)) {
+          return true;
+        }
+      }
+      return false;
     }
 
+    // Transactions
     public void RollDice() {
       for (var i = 0; i < Dice.Length; i++) {
         Dice[i] = Random.Range(0, 2) == 1;
       }
       Renderer.RollDice(Dice);
+
+      if (DiceCount == 0 || !PlayerHasMove(ActivePlayer, DiceCount)) {
+        IsPlayer1Turn = !IsPlayer1Turn;
+        Renderer.SetTurn(IsPlayer1Turn);
+      } else {
+        CurrentState = State.ChoosingMove;
+        InputSystem.CurrentState = InputSystem.State.AwaitingPieceSelection;
+      }
     }
 
     public void MovePiece(Player player, int pieceIndex, Vector2Int position) {
@@ -261,13 +313,15 @@ namespace RoyalGameOfUr {
         otherPlayer.PiecePositions[index] = otherPlayer.Route[0];
         Renderer.MovePiece(player != Player1, index, otherPlayer.Route[0]);
       }
-      if (PositionToTile.TryGetValue(position, out var tile) && !tile.IsRosette) {
-        SetTurn(!IsPlayer1Turn);
-      }
-      RollDice();
-      while (DiceCount == 0) {
-        SetTurn(!IsPlayer1Turn);
-        RollDice();
+      if (PositionToTile.TryGetValue(position, out var tile)) {
+        if (tile.IsRosette) {
+          CurrentState = State.RollingDice;
+          InputSystem.CurrentState = InputSystem.State.AwaitingDiceRoll;
+        } else {
+          IsPlayer1Turn = !IsPlayer1Turn;
+          InputSystem.CurrentState = InputSystem.State.AwaitingDiceRoll;
+          Renderer.SetTurn(IsPlayer1Turn);
+        }
       }
     }
 
@@ -279,18 +333,20 @@ namespace RoyalGameOfUr {
       PositionToTile = FromAuthoredTiles(authoredTiles);
       Player1 = new Player(Renderer.RenderPlayer1);
       Player2 = new Player(Renderer.RenderPlayer2);
-      CurrenState = State.TakingTurn;
       IsPlayer1Turn = true;
-      RollDice();
-      while (DiceCount == 0) {
-        SetTurn(!IsPlayer1Turn);
-        RollDice();
-      }
+      CurrentState = State.RollingDice;
+      InputSystem.CurrentState = InputSystem.State.AwaitingDiceRoll;
     }
 
     void Update() {
-      switch (CurrenState) {
-        case State.TakingTurn: {
+      switch (CurrentState) {
+        case State.RollingDice: {
+          InputSystem.Step(this, Time.deltaTime);
+          Renderer.Step(Time.deltaTime);
+        }
+        break;
+
+        case State.ChoosingMove: {
           InputSystem.Step(this, Time.deltaTime);
           Renderer.Step(Time.deltaTime);
         }
