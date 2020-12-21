@@ -30,7 +30,6 @@ namespace RoyalGameOfUr {
 
         case State.AwaitingDiceRoll: {
           if (Input.GetMouseButtonDown(0) && Physics.Raycast(screenRay, out var hit, MAX_DISTANCE, DiceLayerMask)) {
-            Debug.Log("You clicked the dice plane");
             game.RollDice();
           }
         }
@@ -64,32 +63,61 @@ namespace RoyalGameOfUr {
     }
 
     class MovePieceTransaction : Transaction {
+      enum State { MovingArm, MovingPiece, Done }
+
       AnimationCurve Curve;
-      float Duration;
+      float MoveArmDuration;
+      float MovePieceDuration;
       float Remaining;
+      RenderArm Arm;
       RenderPiece Piece;
       Vector3 StartingPosition;
       Vector3 TargetPosition;
+      State CurrentState;
 
-      public MovePieceTransaction(AnimationCurve curve, in float duration, RenderPiece piece, in Vector2Int position) {
+      public MovePieceTransaction(AnimationCurve curve, in float duration, RenderArm arm, RenderPiece piece, in Vector2Int position) {
         Curve = curve;
-        Duration = duration;
-        Remaining = duration;
+        MoveArmDuration = duration / 2f;
+        MovePieceDuration = duration / 2f;
+        Remaining = MoveArmDuration;
+        Arm = arm;
         Piece = piece;
         TargetPosition = ToWorldPosition(position);
       }
 
       public override bool Complete(Renderer renderer) {
-        return Remaining <= 0;
+        return CurrentState == State.Done;
       }
 
       public override void OnStart(Renderer renderer) {
-        StartingPosition = ToWorldPosition(ToLogicalPosition(Piece.transform.position));
+        StartingPosition = Piece.transform.position;
+        Arm.SetNextTarget(Piece.transform);
+        Arm.BlendToNextTarget(interpolant: 0);
+        Arm.Step(dt: 0);
+        CurrentState = State.MovingArm;
       }
 
       public override void Execute(Renderer renderer, in float dt) {
-        Piece.transform.position = Vector3.Lerp(StartingPosition, TargetPosition, Curve.Evaluate(1 - Remaining / Duration));
-        Remaining = Mathf.Max(0, Remaining - dt);
+        switch (CurrentState) {
+          case State.MovingArm:
+            Arm.Step(dt: dt);
+            Arm.BlendToNextTarget(interpolant: Remaining / MoveArmDuration);
+            Remaining = Mathf.Max(0, Remaining - dt);
+            if (Remaining <= 0) {
+              Remaining = MovePieceDuration;
+              CurrentState = State.MovingPiece;
+            }
+          break;
+
+          case State.MovingPiece:
+            Piece.transform.position = Vector3.Lerp(StartingPosition, TargetPosition, Curve.Evaluate(1 - Remaining / MovePieceDuration));
+            Arm.Step(dt: dt);
+            Remaining = Mathf.Max(0, Remaining - dt);
+            if (Remaining <= 0) {
+              CurrentState = State.Done;
+            }
+          break;
+        }
       }
     }
 
@@ -99,8 +127,8 @@ namespace RoyalGameOfUr {
 
       public RollDiceTransaction(bool[] dice, RenderDice[] renderDice) {
         Dice = new bool[dice.Length];
-        RenderDice = renderDice;
         dice.CopyTo(Dice, 0);
+        RenderDice = renderDice;
       }
 
       public override bool Complete(Renderer renderer) {
@@ -150,14 +178,16 @@ namespace RoyalGameOfUr {
     public class RenderPlayer {
       public Transform[] Route;
       public RenderPiece[] Pieces;
+      public RenderDice[] RenderDice;
+      public RenderArm RenderArm;
     }
 
     public RenderPlayer RenderPlayer1;
     public RenderPlayer RenderPlayer2;
 
-    [SerializeField] RenderDice[] RenderDice = null;
     [SerializeField] AnimationCurve MoveCurve = null;
     [SerializeField] float MoveDuration = 1f;
+
     Queue<Transaction> Transactions = new Queue<Transaction>(INITIAL_TRANSACTION_QUEUE_SIZE);
     Transaction CurrentTransaction;
 
@@ -165,11 +195,13 @@ namespace RoyalGameOfUr {
       var player = isPlayer1 ? RenderPlayer1 : RenderPlayer2;
       var piece = player.Pieces[pieceIndex];
 
-      Transactions.Enqueue(new MovePieceTransaction(MoveCurve, MoveDuration, piece, position));
+      Transactions.Enqueue(new MovePieceTransaction(MoveCurve, MoveDuration, player.RenderArm, piece, position));
     }
 
-    public void RollDice(in bool[] dice) {
-      Transactions.Enqueue(new RollDiceTransaction(dice, RenderDice));
+    public void RollDice(bool isPlayer1, in bool[] dice) {
+      var player = isPlayer1 ? RenderPlayer1 : RenderPlayer2;
+
+      Transactions.Enqueue(new RollDiceTransaction(dice, player.RenderDice));
     }
 
     public void SetTurn(bool isPlayer1) {
@@ -293,7 +325,7 @@ namespace RoyalGameOfUr {
       for (var i = 0; i < Dice.Length; i++) {
         Dice[i] = Random.Range(0, 2) == 1;
       }
-      Renderer.RollDice(Dice);
+      Renderer.RollDice(IsPlayer1Turn, Dice);
 
       if (DiceCount == 0 || !PlayerHasMove(ActivePlayer, DiceCount)) {
         IsPlayer1Turn = !IsPlayer1Turn;
