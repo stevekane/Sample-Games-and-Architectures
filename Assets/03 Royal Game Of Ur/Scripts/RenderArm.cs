@@ -13,8 +13,6 @@ public class RenderArm : MonoBehaviour {
   public void SetNextTarget(Transform nextTarget) {
     CurrentTransform = NextTransform;
     NextTransform = nextTarget;
-    CurrentTargetTransform.position = NextTargetTransform.position;
-    NextTargetTransform.position = nextTarget.position;
   }
 
   public void BlendToNextTarget(in float interpolant) {

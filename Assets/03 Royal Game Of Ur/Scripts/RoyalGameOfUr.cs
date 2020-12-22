@@ -23,10 +23,7 @@ namespace RoyalGameOfUr {
       var player = game.IsPlayer1Turn ? game.Player1 : game.Player2;
 
       switch (CurrentState) {
-        case State.None: {
-
-        }
-        break;
+        case State.None: break;
 
         case State.AwaitingDiceRoll: {
           if (Input.GetMouseButtonDown(0) && Physics.Raycast(screenRay, out var hit, MAX_DISTANCE, DiceLayerMask)) {
