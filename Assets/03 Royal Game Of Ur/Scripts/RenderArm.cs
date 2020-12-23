@@ -1,9 +1,10 @@
 ﻿using UnityEngine;
 using UnityEngine.Animations.Rigging;
+using CustomConstraints;
 
 public class RenderArm : MonoBehaviour {
-  [SerializeField] ChainIKConstraint CurrentConstraint = null;
-  [SerializeField] ChainIKConstraint NextConstraint = null;
+  [SerializeField] PBDBonesConstraint CurrentConstraint = null;
+  [SerializeField] PBDBonesConstraint NextConstraint = null;
   [SerializeField] Transform CurrentTargetTransform = null;
   [SerializeField] Transform NextTargetTransform = null;
 

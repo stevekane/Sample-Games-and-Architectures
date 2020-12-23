@@ -1,0 +1,13 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!221 &22100000
+AnimatorOverrideController:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Remy Animator Controller
+  m_Controller: {fileID: 9100000, guid: 00ef190d0a735f44abf0dbd9fc705a14, type: 2}
+  m_Clips:
+  - m_OriginalClip: {fileID: -203655887218126122, guid: 86419fd47edb51548854ebda6af88d3a, type: 3}
+    m_OverrideClip: {fileID: -203655887218126122, guid: ccee6f0cfbdc0b441a580ca50a99f638, type: 3}
